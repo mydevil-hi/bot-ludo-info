@@ -10,8 +10,8 @@ import threading
 import urllib.request
 
 # ==================== إعدادات البوت ====================
-BOT_TOKEN = "8810433418:AAGG5xjnGd3FksVKlibDc_p3Wl9Ht6JN16c"
-ADMIN_ID = 8557481747
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", 0))
 
 if not BOT_TOKEN:
     print("❌ خطأ: BOT_TOKEN غير موجود")
