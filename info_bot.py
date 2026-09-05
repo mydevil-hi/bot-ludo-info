@@ -674,25 +674,36 @@ def run_bot():
         time.sleep(5)
         run_bot()
 
+# ==================== تشغيل البوت ====================
 if __name__ == "__main__":
+    import os
     port = int(os.environ.get('PORT', 10000))
     
     print("🚀 Bot is running...")
     print("="*50)
-    print(f"📁 Users: {USERS_FILE}")
-    print(f"📁 Results: {RESULTS_FILE}")
-    print(f"🌐 Port: {port}")
-    print("="*50)
     
-    # تشغيل البوت
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
+    # تشغيل Flask في thread
+    from flask import Flask
+    import threading
     
-    # Self-ping
-    ping_thread = threading.Thread(target=keep_alive)
-    ping_thread.daemon = True
-    ping_thread.start()
+    app = Flask(__name__)
     
-    # تشغيل Flask
-    app.run(host='0.0.0.0', port=port)
+    @app.route('/')
+    def home():
+        return "🚀 Bot is running 24/7"
+    
+    @app.route('/health')
+    def health():
+        return "OK"
+    
+    # تشغيل Flask في thread منفصل
+    def run_flask():
+        app.run(host='0.0.0.0', port=port)
+    
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    # تشغيل البوت مباشرة (بدون thread)
+    print("🤖 Bot is polling...")
+    bot.infinity_polling(timeout=60)
