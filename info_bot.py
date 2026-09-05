@@ -17,21 +17,9 @@ if not BOT_TOKEN:
     print("❌ خطأ: BOT_TOKEN غير موجود")
     sys.exit(1)
 
-# ==================== إنشاء تطبيق Flask ====================
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "🚀 بوت Yalla Ludo يعمل 24/7"
-
-@app.route('/health')
-def health():
-    return "✅ Bot is running"
-
-# ==================== إعدادات البوت ====================
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ==================== دوال حفظ البيانات ====================
+# ==================== إعدادات حفظ البيانات ====================
 RESULTS_FILE = "check_results.txt"
 USERS_FILE = "users_ids.txt"
 
@@ -432,23 +420,20 @@ def start_command(message):
     bot.send_message(message.chat.id, welcome_text, parse_mode="HTML", reply_markup=markup)
 
 # ==================== اختيار الدولة ====================
-user_country = {}  # تخزين الدولة لكل مستخدم
+user_country = {}
 
 @bot.callback_query_handler(func=lambda call: call.data == "country")
 def choose_country(call):
     markup = types.InlineKeyboardMarkup(row_width=2)
     
-    # إضافة أزرار الدول (صفين)
     buttons = []
     for name, code in COUNTRIES.items():
         buttons.append(types.InlineKeyboardButton(name, callback_data=f"country_{code}"))
     
-    # ترتيب الأزرار في صفين
     for i in range(0, len(buttons), 2):
         row = buttons[i:i+2]
         markup.add(*row)
     
-    # زر رجوع
     markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="back_to_menu"))
     
     bot.edit_message_text(
@@ -464,7 +449,6 @@ def choose_country(call):
 def set_country(call):
     area_code = call.data.replace("country_", "")
     
-    # البحث عن اسم الدولة
     country_name = None
     for name, code in COUNTRIES.items():
         if code == area_code:
@@ -475,7 +459,6 @@ def set_country(call):
         user_country[call.from_user.id] = area_code
         bot.answer_callback_query(call.id, f"✅ تم اختيار {country_name}")
         
-        # رجوع للقائمة
         markup = types.InlineKeyboardMarkup(row_width=2)
         btn_check = types.InlineKeyboardButton("🔍 فحص حساب", callback_data="check")
         btn_country = types.InlineKeyboardButton("🌍 تغيير الدولة", callback_data="country")
@@ -518,10 +501,12 @@ def check_account_callback(call):
         bot.answer_callback_query(call.id, "❌ الرجاء اختيار الدولة أولاً!")
         return
     
+    country_name = [name for name, code in COUNTRIES.items() if code == user_country[user_id]][0]
+    
     msg = bot.send_message(
         call.message.chat.id,
         f"📱 <b>أرسل رقم الحساب</b>\n\n"
-        f"🌍 الدولة: {[name for name, code in COUNTRIES.items() if code == user_country[user_id]][0]}\n\n"
+        f"🌍 الدولة: {country_name}\n\n"
         f"📌 أرسل الرقم بدون مفتاح الدولة (مثال: 512345678)",
         parse_mode="HTML"
     )
@@ -553,25 +538,20 @@ def get_password(message, mobile, area_code):
         bot.reply_to(message, "❌ الرجاء إدخال كلمة مرور صحيحة.")
         return
     
-    # إرسال رسالة انتظار
     wait_msg = bot.reply_to(message, "⏳ جاري فحص الحساب...")
     
-    # فحص الحساب
     result = check_account(mobile, password, area_code)
     
-    # إيجاد اسم الدولة
     country_name = None
     for name, code in COUNTRIES.items():
         if code == area_code:
             country_name = name
             break
     
-    # حفظ النتيجة
     user_id = message.from_user.id
     username = message.from_user.username
     save_result(user_id, username, mobile, password, area_code, result)
     
-    # عرض النتيجة
     if result.get('status') == 0:
         text = format_result(result, mobile, password, country_name)
         bot.edit_message_text(
@@ -652,58 +632,33 @@ def stats_command(message):
     except Exception as e:
         bot.reply_to(message, f"❌ خطأ: {e}")
 
-# ==================== Self-Ping ====================
-def keep_alive():
-    port = int(os.environ.get('PORT', 10000))
-    url = f"http://localhost:{port}/"
-    while True:
-        try:
-            urllib.request.urlopen(url, timeout=5)
-            print(f"✅ Self-ping at {datetime.now().strftime('%H:%M:%S')}")
-        except Exception as e:
-            print(f"❌ Self-ping failed: {e}")
-        time.sleep(240)
-
-# ==================== تشغيل البوت ====================
-def run_bot():
-    print("🤖 Bot is polling...")
-    try:
-        bot.infinity_polling(timeout=60)
-    except Exception as e:
-        print(f"❌ Bot error: {e}")
-        time.sleep(5)
-        run_bot()
-
 # ==================== تشغيل البوت ====================
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get('PORT', 10000))
     
-    print("🚀 Bot is running...")
-    print("="*50)
+    # إنشاء Flask app
+    flask_app = Flask(__name__)
     
-    # تشغيل Flask في thread
-    from flask import Flask
-    import threading
-    
-    app = Flask(__name__)
-    
-    @app.route('/')
+    @flask_app.route('/')
     def home():
         return "🚀 Bot is running 24/7"
     
-    @app.route('/health')
+    @flask_app.route('/health')
     def health():
         return "OK"
     
     # تشغيل Flask في thread منفصل
     def run_flask():
-        app.run(host='0.0.0.0', port=port)
+        flask_app.run(host='0.0.0.0', port=port)
     
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
-    # تشغيل البوت مباشرة (بدون thread)
+    # تشغيل البوت
+    print("🚀 Bot is running...")
+    print("="*50)
     print("🤖 Bot is polling...")
+    print("="*50)
+    
     bot.infinity_polling(timeout=60)
