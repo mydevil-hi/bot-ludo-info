@@ -495,4 +495,18 @@ def run_bot():
     bot.infinity_polling(timeout=60)
 
 if __name__ == "__main__":
+    print("🚀 بوت فحص حسابات Yalla Ludo يعمل...")
+    print("="*50)
+    print("🌐 بدون بروكسي - اتصال مباشر")
+    print(f"📁 حفظ المستخدمين في: {USERS_FILE}")
+    print(f"📁 حفظ النتائج في: {RESULTS_FILE}")
+    print("="*50)
     
+    # تشغيل البوت في thread منفصل
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # تشغيل Flask عشان يبقى شغال
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
