@@ -507,8 +507,15 @@ def keep_alive():
         time.sleep(240)  # 4 دقائق
 
 # ==================== تشغيل البوت ====================
+# ==================== تشغيل البوت ====================
 def run_bot():
-    bot.infinity_polling(timeout=60)
+    print("🤖 Bot is polling...")
+    while True:
+        try:
+            bot.infinity_polling(timeout=60)
+        except Exception as e:
+            print(f"❌ Bot error: {e}")
+            time.sleep(5)
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 10000))
@@ -520,15 +527,13 @@ if __name__ == "__main__":
     print(f"🌐 PORT: {port}")
     print("="*50)
     
-    # تشغيل البوت في thread منفصل
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
+    # تشغيل Flask في thread منفصل
+    def run_flask():
+        app.run(host='0.0.0.0', port=port)
     
-    # تشغيل Self-Ping في thread منفصل
-    ping_thread = threading.Thread(target=keep_alive)
-    ping_thread.daemon = True
-    ping_thread.start()
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
     
-    # تشغيل Flask
-    app.run(host='0.0.0.0', port=port)
+    # تشغيل البوت في Main thread
+    run_bot()
